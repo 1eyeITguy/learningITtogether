@@ -2,10 +2,10 @@
 
 <#
 .SYNOPSIS
-    OSDCloud Workspace Prerequisites Installation Script
+    OSD.Workspace Prerequisites Installation Script
     
 .DESCRIPTION
-    This script installs and configures all prerequisites for OSDCloud.Workspace development.
+    This script installs and configures all prerequisites for OSD.Workspace development.
     Based on the official OSDeploy documentation: https://github.com/OSDeploy/OSD.Workspace/wiki
     
     IMPORTANT: Before running this script, you must set the execution policy manually:
@@ -37,7 +37,7 @@
 # ===============================================================================
 
 Write-Host "+=======================================================================+" -ForegroundColor Cyan
-Write-Host "|              OSDCloud Workspace Prerequisites Installer               |" -ForegroundColor Cyan
+Write-Host "|                 OSD.Workspace Prerequisites Installer                 |" -ForegroundColor Cyan
 Write-Host "|                             Version 2.2                               |" -ForegroundColor Cyan
 Write-Host "+=======================================================================+" -ForegroundColor Cyan
 Write-Host ""
@@ -104,16 +104,24 @@ if (-not $isAdmin) {
 # Check PowerShell version
 $psVersion = $PSVersionTable.PSVersion
 if ($psVersion.Major -lt 7) {
-    Write-Status "WARNING: Running PowerShell $($psVersion.ToString())" "WARNING"
-    Write-Status "This script is optimized for PowerShell 7" "WARNING"
-    Write-Host ""
-    Write-Host "  To install PowerShell 7, run this command:" -ForegroundColor Yellow
-    Write-Host "  winget install -e --id Microsoft.PowerShell --override '/passive ADD_EXPLORER_CONTEXT_MENU_OPENPOWERSHELL=1 ADD_FILE_CONTEXT_MENU_RUNPOWERSHELL=1 ENABLE_PSREMOTING=1 REGISTER_MANIFEST=1 USE_MU=1 ENABLE_MU=1 ADD_PATH=1'" -ForegroundColor Cyan
-    Write-Host ""
-    $continue = Read-Host "Do you want to continue with PowerShell $($psVersion.ToString())? (y/n)"
-    if ($continue -ne 'y' -and $continue -ne 'yes') {
-        Write-Status "Script execution cancelled by user" "INFO"
-        exit 0
+    Write-Status "PowerShell $($psVersion.ToString()) detected - Installing PowerShell 7..." "WARNING"
+    Write-Status "Installing PowerShell 7 with full configuration..." "INFO"
+    
+    try {
+        $ps7InstallCommand = 'winget install -e --id Microsoft.PowerShell --accept-source-agreements --override "/passive ADD_EXPLORER_CONTEXT_MENU_OPENPOWERSHELL=1 ADD_FILE_CONTEXT_MENU_RUNPOWERSHELL=1 ENABLE_PSREMOTING=1 REGISTER_MANIFEST=1 USE_MU=1 ENABLE_MU=1 ADD_PATH=1"'
+        # Write-Status "Running: $ps7InstallCommand" "INFO"
+        $process = Start-Process -FilePath "winget" -ArgumentList "install -e --id Microsoft.PowerShell --accept-source-agreements --override `"/passive ADD_EXPLORER_CONTEXT_MENU_OPENPOWERSHELL=1 ADD_FILE_CONTEXT_MENU_RUNPOWERSHELL=1 ENABLE_PSREMOTING=1 REGISTER_MANIFEST=1 USE_MU=1 ENABLE_MU=1 ADD_PATH=1`"" -Wait -PassThru -NoNewWindow
+        
+        if ($process.ExitCode -eq 0) {
+            Write-Status "PowerShell 7 installed successfully" "SUCCESS"
+            Write-Status "Continuing with module installations to PowerShell 7 location..." "INFO"
+        } else {
+            Write-Status "PowerShell 7 installation failed with exit code: $($process.ExitCode)" "ERROR"
+            throw "PowerShell 7 installation failed"
+        }
+    } catch {
+        Write-Status "Failed to install PowerShell 7: $($_.Exception.Message)" "ERROR"
+        throw
     }
 } else {
     Write-Status "Running PowerShell $($psVersion.ToString()) - OK" "SUCCESS"
@@ -136,7 +144,7 @@ if ($gitInstalled) {
     if ([string]::IsNullOrWhiteSpace($currentEmail) -or $currentEmail -eq "you@example.com") {
         Write-Host ""
         Write-Host "Git is installed but email is not configured." -ForegroundColor Yellow
-        Write-Host "Please enter your Git email address: " -ForegroundColor Yellow -NoNewline
+        Write-Host "Please enter your email address: " -ForegroundColor Yellow -NoNewline
         $gitUserEmail = Read-Host
     } else {
         Write-Status "Git email already configured: $currentEmail" "SKIP"
@@ -144,7 +152,7 @@ if ($gitInstalled) {
     
     # Only ask for name if it's not configured or has default values
     if ([string]::IsNullOrWhiteSpace($currentName) -or $currentName -eq "Your Name") {
-        Write-Host "Please enter your Git user name: " -ForegroundColor Yellow -NoNewline
+        Write-Host "Please enter your name: " -ForegroundColor Yellow -NoNewline
         $gitUserName = Read-Host
     } else {
         Write-Status "Git user name already configured: $currentName" "SKIP"
@@ -152,9 +160,9 @@ if ($gitInstalled) {
 } else {
     Write-Host ""
     Write-Host "Git is not installed. Please provide your Git configuration:" -ForegroundColor Yellow
-    Write-Host "Enter your Git email address: " -ForegroundColor Yellow -NoNewline
+    Write-Host "Please enter your email address: " -ForegroundColor Yellow -NoNewline
     $gitUserEmail = Read-Host
-    Write-Host "Enter your Git user name: " -ForegroundColor Yellow -NoNewline
+    Write-Host "Please enter your name: " -ForegroundColor Yellow -NoNewline
     $gitUserName = Read-Host
 }
 
@@ -193,7 +201,7 @@ try {
     $nugetProvider = Get-PackageProvider -Name 'NuGet' -ErrorAction SilentlyContinue
     if (-not $nugetProvider) {
         Write-Status "Installing NuGet package provider..." "INFO"
-        Install-PackageProvider -Name NuGet -Force -Verbose
+        Install-PackageProvider -Name NuGet -ForceBootstrap -Verbose
         Write-Status "NuGet package provider installed successfully" "SUCCESS"
     } else {
         Write-Status "NuGet package provider already installed (Version: $($nugetProvider.Version))" "SKIP"
@@ -231,25 +239,43 @@ try {
 
 Write-SectionHeader "PowerShell Core Modules"
 
+$ps7ModulesPath = "C:\Program Files\PowerShell\7\Modules"
+if (!(Test-Path $ps7ModulesPath)) {
+    Write-Status "PowerShell 7 Modules path not found - creating directory" "WARNING"
+    New-Item -Path $ps7ModulesPath -ItemType Directory -Force | Out-Null
+}
+
 try {
-    # Check and install PowerShellGet
-    $psGetModule = Get-Module -Name PowerShellGet -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
-    if (-not $psGetModule -or $psGetModule.Version -lt [Version]"2.2.5") {
-        Write-Status "Installing/updating PowerShellGet module..." "INFO"
-        Install-Module -Name PowerShellGet -Force -Scope AllUsers -AllowClobber -SkipPublisherCheck -Verbose
-        Write-Status "PowerShellGet module installed successfully" "SUCCESS"
+    # Check and install PowerShellGet to PS7
+    $psGetPath = Join-Path $ps7ModulesPath "PowerShellGet"
+    if (!(Test-Path $psGetPath)) {
+        Write-Status "Installing PowerShellGet module to PowerShell 7..." "INFO"
+        $tempPath = Join-Path $env:TEMP "PSModule_PowerShellGet"
+        if (Test-Path $tempPath) { Remove-Item $tempPath -Recurse -Force }
+        Save-Module -Name PowerShellGet -Path $env:TEMP -Repository PSGallery -Force
+        $savedPath = Join-Path $env:TEMP "PowerShellGet"
+        if (Test-Path $savedPath) {
+            Move-Item -Path $savedPath -Destination $ps7ModulesPath -Force
+            Write-Status "PowerShellGet module installed to PowerShell 7 successfully" "SUCCESS"
+        }
     } else {
-        Write-Status "PowerShellGet module already up to date (Version: $($psGetModule.Version))" "SKIP"
+        Write-Status "PowerShellGet module already installed in PowerShell 7" "SKIP"
     }
     
-    # Check and install PackageManagement
-    $pkgMgmtModule = Get-Module -Name PackageManagement -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
-    if (-not $pkgMgmtModule -or $pkgMgmtModule.Version -lt [Version]"1.4.7") {
-        Write-Status "Installing/updating PackageManagement module..." "INFO"
-        Install-Module -Name PackageManagement -Force -Scope AllUsers -AllowClobber -SkipPublisherCheck -Verbose
-        Write-Status "PackageManagement module installed successfully" "SUCCESS"
+    # Check and install PackageManagement to PS7
+    $pkgMgmtPath = Join-Path $ps7ModulesPath "PackageManagement"
+    if (!(Test-Path $pkgMgmtPath)) {
+        Write-Status "Installing PackageManagement module to PowerShell 7..." "INFO"
+        $tempPath = Join-Path $env:TEMP "PSModule_PackageManagement"
+        if (Test-Path $tempPath) { Remove-Item $tempPath -Recurse -Force }
+        Save-Module -Name PackageManagement -Path $env:TEMP -Repository PSGallery -Force
+        $savedPath = Join-Path $env:TEMP "PackageManagement"
+        if (Test-Path $savedPath) {
+            Move-Item -Path $savedPath -Destination $ps7ModulesPath -Force
+            Write-Status "PackageManagement module installed to PowerShell 7 successfully" "SUCCESS"
+        }
     } else {
-        Write-Status "PackageManagement module already up to date (Version: $($pkgMgmtModule.Version))" "SKIP"
+        Write-Status "PackageManagement module already installed in PowerShell 7" "SKIP"
     }
 } catch {
     Write-Status "Failed to install PowerShell core modules: $($_.Exception.Message)" "ERROR"
@@ -270,7 +296,7 @@ try {
         Write-Status "Git already installed: $gitVersion" "SKIP"
     } else {
         Write-Status "Installing Git for Windows..." "INFO"
-        winget install --id Git.Git -e -h
+        winget install --id Git.Git -e -h --accept-source-agreements
         Write-Status "Git for Windows installed successfully" "SUCCESS"
         
         # Refresh environment variables
@@ -318,7 +344,7 @@ try {
     } else {
         Write-Status "Installing Visual Studio Code Insiders..." "INFO"
         $vscodeArgs = '/SILENT /mergetasks="!runcode,addcontextmenufiles,addcontextmenufolders,associatewithfiles,addtopath"'
-        winget install -e --id Microsoft.VisualStudioCode.Insiders --override $vscodeArgs
+        winget install -e --id Microsoft.VisualStudioCode.Insiders --accept-source-agreements --override $vscodeArgs
         Write-Status "Visual Studio Code Insiders installed successfully" "SUCCESS"
     }
 } catch {
@@ -449,6 +475,12 @@ try {
 
 Write-SectionHeader "OSD PowerShell Modules"
 
+$ps7ModulesPath = "C:\Program Files\PowerShell\7\Modules"
+if (!(Test-Path $ps7ModulesPath)) {
+    Write-Status "PowerShell 7 Modules path not found - creating directory" "WARNING"
+    New-Item -Path $ps7ModulesPath -ItemType Directory -Force | Out-Null
+}
+
 $modules = @(
     @{ Name = "OSD.Workspace"; Description = "The main OSDWorkspace PowerShell Module" },
     @{ Name = "platyPS"; Description = "Required for creating OSDWorkspace help files" },
@@ -458,15 +490,29 @@ $modules = @(
 
 foreach ($module in $modules) {
     try {
-        # Check if module is already installed
-        $installedModule = Get-Module -Name $module.Name -ListAvailable -ErrorAction SilentlyContinue
-        if ($installedModule) {
-            $latestVersion = $installedModule | Sort-Object Version -Descending | Select-Object -First 1
-            Write-Status "$($module.Name) already installed (Version: $($latestVersion.Version))" "SKIP"
+        # Check if module is already installed in PS7 location
+        $modulePath = Join-Path $ps7ModulesPath $module.Name
+        if (Test-Path $modulePath) {
+            Write-Status "$($module.Name) already installed in PowerShell 7" "SKIP"
         } else {
-            Write-Status "Installing $($module.Name) module - $($module.Description)..." "INFO"
-            Install-Module -Name $module.Name -SkipPublisherCheck -Force -AllowClobber
-            Write-Status "$($module.Name) module installed successfully" "SUCCESS"
+            Write-Status "Installing $($module.Name) module to PowerShell 7 - $($module.Description)..." "INFO"
+            
+            # Save module to temp location
+            $tempPath = Join-Path $env:TEMP "PSModule_$($module.Name)"
+            if (Test-Path $tempPath) {
+                Remove-Item $tempPath -Recurse -Force
+            }
+            
+            Save-Module -Name $module.Name -Path $env:TEMP -Repository PSGallery -Force
+            
+            # Move to PS7 modules location
+            $savedModulePath = Join-Path $env:TEMP $module.Name
+            if (Test-Path $savedModulePath) {
+                Move-Item -Path $savedModulePath -Destination $ps7ModulesPath -Force
+                Write-Status "$($module.Name) module installed to PowerShell 7 successfully" "SUCCESS"
+            } else {
+                Write-Status "Failed to save $($module.Name) module" "ERROR"
+            }
         }
     } catch {
         Write-Status "Failed to install $($module.Name) module: $($_.Exception.Message)" "ERROR"
@@ -485,25 +531,22 @@ Write-Host "+===================================================================
 Write-Host ""
 
 Write-Status "All OSDCloud Workspace prerequisites have been installed successfully!" "SUCCESS"
-Write-Status "TERMINAL RESTART REQUIRED: You must restart your terminal session for all changes to take effect." "WARNING"
+Write-Status "You can now proceed with creating your OSD workspace." "INFO"
 Write-Host ""
 
 Write-Host "NEXT STEPS:" -ForegroundColor Cyan
 Write-Host "----------" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "1. RESTART YOUR TERMINAL SESSION" -ForegroundColor Yellow
-Write-Host "   This is required to complete the installation of all components." -ForegroundColor White
-Write-Host ""
-Write-Host "2. After restart, open PowerShell 7 and run:" -ForegroundColor Yellow
+Write-Host "1. Open PowerShell 7 and run:" -ForegroundColor Yellow
 Write-Host "   Install-OSDWorkspace" -ForegroundColor Cyan
 Write-Host "   This will create your OSD workspace directory." -ForegroundColor White
 Write-Host ""
-Write-Host "3. Open the workspace in VS Code Insiders:" -ForegroundColor Yellow
+Write-Host "2. Open the workspace in VS Code Insiders:" -ForegroundColor Yellow
 Write-Host "   cd C:\OSDWorkspace" -ForegroundColor Cyan
 Write-Host "   code-insiders ." -ForegroundColor Cyan
 Write-Host "   This will open your workspace in VS Code Insiders." -ForegroundColor White
 Write-Host ""
-Write-Host "4. Your OSD workspace will be located at:" -ForegroundColor Yellow
+Write-Host "3. Your OSD workspace will be located at:" -ForegroundColor Yellow
 Write-Host "   C:\OSDWorkspace" -ForegroundColor Cyan
 Write-Host ""
 
