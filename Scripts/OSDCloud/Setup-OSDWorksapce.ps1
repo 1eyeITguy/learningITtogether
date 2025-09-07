@@ -25,7 +25,7 @@
     
 .NOTES
     Author: Matthew Miles
-    Version: 2.2
+    Version: 2.3
     Requires: Administrator privileges
     
 .LINK
@@ -38,7 +38,7 @@
 
 Write-Host "+=======================================================================+" -ForegroundColor Cyan
 Write-Host "|                 OSD.Workspace Prerequisites Installer                 |" -ForegroundColor Cyan
-Write-Host "|                             Version 2.2                               |" -ForegroundColor Cyan
+Write-Host "|                             Version 2.3                               |" -ForegroundColor Cyan
 Write-Host "+=======================================================================+" -ForegroundColor Cyan
 Write-Host ""
 
@@ -239,43 +239,38 @@ try {
 
 Write-SectionHeader "PowerShell Core Modules"
 
-$ps7ModulesPath = "C:\Program Files\PowerShell\7\Modules"
+# Ensure PowerShell 7 modules path exists and is in PSModulePath
+$ps7ModulesPath = "C:\Program Files\PowerShell\Modules"
 if (!(Test-Path $ps7ModulesPath)) {
-    Write-Status "PowerShell 7 Modules path not found - creating directory" "WARNING"
+    Write-Status "Creating PowerShell 7 Modules directory..." "INFO"
     New-Item -Path $ps7ModulesPath -ItemType Directory -Force | Out-Null
 }
 
+# Add PS7 modules path to PSModulePath if not already there
+if ($env:PSModulePath -notlike "*$ps7ModulesPath*") {
+    $env:PSModulePath = "$ps7ModulesPath;$env:PSModulePath"
+    Write-Status "Added PowerShell 7 modules path to PSModulePath" "INFO"
+}
+
 try {
-    # Check and install PowerShellGet to PS7
-    $psGetPath = Join-Path $ps7ModulesPath "PowerShellGet"
-    if (!(Test-Path $psGetPath)) {
-        Write-Status "Installing PowerShellGet module to PowerShell 7..." "INFO"
-        $tempPath = Join-Path $env:TEMP "PSModule_PowerShellGet"
-        if (Test-Path $tempPath) { Remove-Item $tempPath -Recurse -Force }
-        Save-Module -Name PowerShellGet -Path $env:TEMP -Repository PSGallery -Force
-        $savedPath = Join-Path $env:TEMP "PowerShellGet"
-        if (Test-Path $savedPath) {
-            Move-Item -Path $savedPath -Destination $ps7ModulesPath -Force
-            Write-Status "PowerShellGet module installed to PowerShell 7 successfully" "SUCCESS"
-        }
+    # Check and install PowerShellGet
+    $psGetModule = Get-Module -Name PowerShellGet -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
+    if (-not $psGetModule -or $psGetModule.Version -lt [Version]"2.2.5") {
+        Write-Status "Installing/updating PowerShellGet module..." "INFO"
+        Save-Module -Name PowerShellGet -Path $ps7ModulesPath -Repository PSGallery -Force
+        Write-Status "PowerShellGet module installed to PowerShell 7 location successfully" "SUCCESS"
     } else {
-        Write-Status "PowerShellGet module already installed in PowerShell 7" "SKIP"
+        Write-Status "PowerShellGet module already up to date (Version: $($psGetModule.Version))" "SKIP"
     }
     
-    # Check and install PackageManagement to PS7
-    $pkgMgmtPath = Join-Path $ps7ModulesPath "PackageManagement"
-    if (!(Test-Path $pkgMgmtPath)) {
-        Write-Status "Installing PackageManagement module to PowerShell 7..." "INFO"
-        $tempPath = Join-Path $env:TEMP "PSModule_PackageManagement"
-        if (Test-Path $tempPath) { Remove-Item $tempPath -Recurse -Force }
-        Save-Module -Name PackageManagement -Path $env:TEMP -Repository PSGallery -Force
-        $savedPath = Join-Path $env:TEMP "PackageManagement"
-        if (Test-Path $savedPath) {
-            Move-Item -Path $savedPath -Destination $ps7ModulesPath -Force
-            Write-Status "PackageManagement module installed to PowerShell 7 successfully" "SUCCESS"
-        }
+    # Check and install PackageManagement
+    $pkgMgmtModule = Get-Module -Name PackageManagement -ListAvailable | Sort-Object Version -Descending | Select-Object -First 1
+    if (-not $pkgMgmtModule -or $pkgMgmtModule.Version -lt [Version]"1.4.7") {
+        Write-Status "Installing/updating PackageManagement module..." "INFO"
+        Save-Module -Name PackageManagement -Path $ps7ModulesPath -Repository PSGallery -Force
+        Write-Status "PackageManagement module installed to PowerShell 7 location successfully" "SUCCESS"
     } else {
-        Write-Status "PackageManagement module already installed in PowerShell 7" "SKIP"
+        Write-Status "PackageManagement module already up to date (Version: $($pkgMgmtModule.Version))" "SKIP"
     }
 } catch {
     Write-Status "Failed to install PowerShell core modules: $($_.Exception.Message)" "ERROR"
@@ -475,10 +470,17 @@ try {
 
 Write-SectionHeader "OSD PowerShell Modules"
 
-$ps7ModulesPath = "C:\Program Files\PowerShell\7\Modules"
+# Ensure PowerShell 7 modules path exists and is in PSModulePath
+$ps7ModulesPath = "C:\Program Files\PowerShell\Modules"
 if (!(Test-Path $ps7ModulesPath)) {
-    Write-Status "PowerShell 7 Modules path not found - creating directory" "WARNING"
+    Write-Status "Creating PowerShell 7 Modules directory..." "INFO"
     New-Item -Path $ps7ModulesPath -ItemType Directory -Force | Out-Null
+}
+
+# Add PS7 modules path to PSModulePath if not already there
+if ($env:PSModulePath -notlike "*$ps7ModulesPath*") {
+    $env:PSModulePath = "$ps7ModulesPath;$env:PSModulePath"
+    Write-Status "Added PowerShell 7 modules path to PSModulePath" "INFO"
 }
 
 $modules = @(
@@ -493,26 +495,11 @@ foreach ($module in $modules) {
         # Check if module is already installed in PS7 location
         $modulePath = Join-Path $ps7ModulesPath $module.Name
         if (Test-Path $modulePath) {
-            Write-Status "$($module.Name) already installed in PowerShell 7" "SKIP"
+            Write-Status "$($module.Name) already installed in PowerShell 7 location" "SKIP"
         } else {
-            Write-Status "Installing $($module.Name) module to PowerShell 7 - $($module.Description)..." "INFO"
-            
-            # Save module to temp location
-            $tempPath = Join-Path $env:TEMP "PSModule_$($module.Name)"
-            if (Test-Path $tempPath) {
-                Remove-Item $tempPath -Recurse -Force
-            }
-            
-            Save-Module -Name $module.Name -Path $env:TEMP -Repository PSGallery -Force
-            
-            # Move to PS7 modules location
-            $savedModulePath = Join-Path $env:TEMP $module.Name
-            if (Test-Path $savedModulePath) {
-                Move-Item -Path $savedModulePath -Destination $ps7ModulesPath -Force
-                Write-Status "$($module.Name) module installed to PowerShell 7 successfully" "SUCCESS"
-            } else {
-                Write-Status "Failed to save $($module.Name) module" "ERROR"
-            }
+            Write-Status "Installing $($module.Name) module to PowerShell 7 location - $($module.Description)..." "INFO"
+            Save-Module -Name $module.Name -Path $ps7ModulesPath -Repository PSGallery -Force
+            Write-Status "$($module.Name) module installed to PowerShell 7 location successfully" "SUCCESS"
         }
     } catch {
         Write-Status "Failed to install $($module.Name) module: $($_.Exception.Message)" "ERROR"
