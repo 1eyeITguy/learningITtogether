@@ -128,11 +128,29 @@ function Get-PrerequisiteStatus {
         }
         
         "PowerShell7" {
-            $psVersion = $PSVersionTable.PSVersion
-            $status.CurrentVersion = $psVersion.ToString()
-            $status.IsInstalled = $psVersion.Major -ge 7
-            $status.Details = "Current version: $($status.CurrentVersion)"
-            if (-not $status.IsInstalled) {
+            # Check if PowerShell 7 is actually installed on the system (not just the current session)
+            $ps7InstallPath = "${env:ProgramFiles}\PowerShell\7"
+            $ps7Executable = Join-Path $ps7InstallPath "pwsh.exe"
+            $status.IsInstalled = (Test-Path $ps7InstallPath) -and (Test-Path $ps7Executable)
+            
+            if ($status.IsInstalled) {
+                # Get the installed version if PowerShell 7 is installed
+                try {
+                    $ps7Version = & $ps7Executable --version 2>$null
+                    if ($ps7Version) {
+                        $status.CurrentVersion = $ps7Version.Replace("PowerShell ", "")
+                        $status.Details = "Installed version: $($status.CurrentVersion) at $ps7InstallPath"
+                    } else {
+                        $status.CurrentVersion = "Unknown"
+                        $status.Details = "Installed at: $ps7InstallPath"
+                    }
+                } catch {
+                    $status.CurrentVersion = "Unknown"
+                    $status.Details = "Installed at: $ps7InstallPath"
+                }
+            } else {
+                $currentVersion = $PSVersionTable.PSVersion.ToString()
+                $status.Details = "Not installed - Currently running PowerShell $currentVersion"
                 $status.Action = "Install PowerShell 7"
                 $status.Priority = 2
             }
