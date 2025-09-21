@@ -282,7 +282,9 @@ function Get-PrerequisiteStatus {
         "WinPEx86Fix" {
             $winpeOCsPath = 'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Windows Preinstallation Environment\x86\WinPE_OCs'
             $mdtPath = "${env:ProgramFiles}\Microsoft Deployment Toolkit"
-            $mdtInstalled = Test-Path $mdtPath
+            # Check for actual MDT installation by looking for key files
+            $mdtBinPath = Join-Path $mdtPath "bin"
+            $mdtInstalled = (Test-Path $mdtPath) -and (Test-Path $mdtBinPath) -and (Test-Path (Join-Path $mdtBinPath "MicrosoftDeploymentToolkit.psd1"))
             
             $status.IsInstalled = Test-Path $winpeOCsPath
             $status.IsOptional = -not $mdtInstalled  # Only required if MDT is installed
@@ -304,7 +306,9 @@ function Get-PrerequisiteStatus {
         
         "MDT" {
             $mdtPath = "${env:ProgramFiles}\Microsoft Deployment Toolkit"
-            $status.IsInstalled = Test-Path $mdtPath
+            # Check for actual MDT installation by looking for key files
+            $mdtBinPath = Join-Path $mdtPath "bin"
+            $status.IsInstalled = (Test-Path $mdtPath) -and (Test-Path $mdtBinPath) -and (Test-Path (Join-Path $mdtBinPath "MicrosoftDeploymentToolkit.psd1"))
             $status.IsOptional = $true  # Mark as optional
             if ($status.IsInstalled) {
                 $status.Details = "Installed at: $mdtPath"
@@ -927,12 +931,15 @@ foreach ($prerequisite in $InstallationOrder) {
             }
             
             "WinPEx86Fix" {
-                # Only install if MDT is installed and the fix is needed
+                # Only install if MDT is actually installed and the fix is needed
                 $mdtPath = "${env:ProgramFiles}\Microsoft Deployment Toolkit"
-                if (-not $prerequisite.IsInstalled -and (Test-Path $mdtPath)) {
+                $mdtBinPath = Join-Path $mdtPath "bin"
+                $mdtActuallyInstalled = (Test-Path $mdtPath) -and (Test-Path $mdtBinPath) -and (Test-Path (Join-Path $mdtBinPath "MicrosoftDeploymentToolkit.psd1"))
+                
+                if (-not $prerequisite.IsInstalled -and $mdtActuallyInstalled) {
                     Install-WinPEx86Fix
-                } elseif (-not (Test-Path $mdtPath)) {
-                    Write-Status "Skipping WinPE x86 fix - MDT is not installed" "SKIP"
+                } elseif (-not $mdtActuallyInstalled) {
+                    Write-Status "Skipping WinPE x86 fix - MDT is not actually installed" "SKIP"
                 }
             }
             
