@@ -19,13 +19,13 @@
     This script does not accept command-line parameters. Configuration is done via variables at the top of the script.
 
 .EXAMPLE
-    .\new-PSADTDeployment.ps1
+    .\New-PSADTDeployment.ps1
     
     Runs the script interactively, prompting for application vendor, name, and version.
     Uses the configured settings for company name, asset URLs, and log location.
 
 .NOTES
-    File Name      : new-PSADTDeployment.ps1
+    File Name      : New-PSADTDeployment.ps1
     Author         : Matthew Miles
     Prerequisite   : PowerShell 7.0 or later
     Copyright      : Free to use and modify
