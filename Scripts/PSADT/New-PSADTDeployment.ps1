@@ -19,13 +19,13 @@
     This script does not accept command-line parameters. Configuration is done via variables at the top of the script.
 
 .EXAMPLE
-    .\New-PSADTDeployment.ps1
+    .\new-PSADTDeployment.ps1
     
     Runs the script interactively, prompting for application vendor, name, and version.
     Uses the configured settings for company name, asset URLs, and log location.
 
 .NOTES
-    File Name      : New-PSADTDeployment.ps1
+    File Name      : new-PSADTDeployment.ps1
     Author         : Matthew Miles
     Prerequisite   : PowerShell 7.0 or later
     Copyright      : Free to use and modify
@@ -48,13 +48,11 @@
 # User-configurable settings
 # ==========================
 
-# URLs for asset downloads (leave empty for template default)
-# Supports both internet URLs and local file paths (UNC/file server)
-# Note: For security, only HTTPS URLs are allowed for internet downloads
+# URLs for asset downloads
 $AppIconUrl = ""
 $BannerClassicUrl = ""
 
-# Company name to write into config.psd1 (leave empty for template default)
+# Company name to write into config.psd1
 $CompanyName = ""
 
 # Script author name (leave empty for template default)
@@ -62,10 +60,10 @@ $Author = ""
 
 # Log path to set in config.psd1 (leave empty for template default)
 # For Intune logging use: C:\ProgramData\Microsoft\IntuneManagementExtension\Logs
-$LogPath = ""
+$LogPath = "C:\ProgramData\Microsoft\IntuneManagementExtension\Logs"
 
 # Default application architecture (x86, x64, or leave empty for template default)
-$DefaultAppArch = ""
+$DefaultAppArch = "x64"
 
 # ==========================
 
@@ -162,14 +160,13 @@ function Get-ValidatedInput {
     )
     
     do {
-        $userInput = Read-Host $Prompt
-        if ([string]::IsNullOrWhiteSpace($userInput)) {
+        $input = Read-Host $Prompt
+        if ([string]::IsNullOrWhiteSpace($input)) {
             Write-StepOutput $ErrorMessage -Status "Error"
         }
-    } while ([string]::IsNullOrWhiteSpace($userInput))
+    } while ([string]::IsNullOrWhiteSpace($input))
     
-    # Sanitize input: trim and escape quotes for safety
-    return $userInput.Trim().Replace("'", "''").Replace('"', '""')
+    return $input.Trim()
 }
 
 # Function to wait for folder structure creation
@@ -183,7 +180,7 @@ function Wait-ForFolderStructure {
     $attempt = 0
     do {
         $attempt++
-        Start-Sleep -Milliseconds 500  # Reduced from 1 second for faster checks
+        Start-Sleep -Seconds 1
         
         $allFoldersExist = $true
         foreach ($folder in $RequiredFolders) {
@@ -233,9 +230,9 @@ function Update-AssetFiles {
         return
     }
     
-    Write-StepOutput "Processing custom asset files..." -Status "Download"
+    Write-StepOutput "Downloading and replacing custom asset files..." -Status "Download"
     
-    # Verify Assets folder exists
+    # Verify Assets folder exists before attempting downloads
     if (!(Test-Path $AssetsPath)) {
         Write-StepOutput "Assets folder not found. Creating directory..." -Status "Warning"
         New-Item -Path $AssetsPath -ItemType Directory -Force | Out-Null
@@ -244,27 +241,13 @@ function Update-AssetFiles {
     foreach ($file in $AssetMappings.GetEnumerator()) {
         try {
             $filePath = Join-Path $AssetsPath $file.Key
-            $source = $file.Value
+            Write-StepOutput "Downloading $($file.Key)..." -Status "Download"
             
-            # Check if source is a local file path (supports UNC/file server)
-            if (Test-Path $source) {
-                Write-StepOutput "Copying local file $($file.Key)..." -Status "Download"
-                Copy-Item -Path $source -Destination $filePath -Force
-                Write-StepOutput "Successfully copied $($file.Key)" -Status "Success"
-            } elseif ($source -match '^https?://') {
-                # Handle internet URLs with basic security check
-                if ($source -notmatch '^https://') {
-                    Write-StepOutput "Warning: Skipping insecure URL for $($file.Key)" -Status "Warning"
-                    continue
-                }
-                Write-StepOutput "Downloading $($file.Key)..." -Status "Download"
-                Invoke-WebRequest -Uri $source -OutFile $filePath -UseBasicParsing
-                Write-StepOutput "Successfully downloaded $($file.Key)" -Status "Success"
-            } else {
-                Write-StepOutput "Warning: Invalid source for $($file.Key) - must be a valid URL or local path" -Status "Warning"
-            }
+            Invoke-WebRequest -Uri $file.Value -OutFile $filePath -UseBasicParsing
+            Write-StepOutput "Successfully downloaded $($file.Key)" -Status "Success"
+            
         } catch {
-            Write-StepOutput "Warning: Could not process $($file.Key) - $($_.Exception.Message)" -Status "Warning"
+            Write-StepOutput "Warning: Could not download $($file.Key) - $($_.Exception.Message)" -Status "Warning"
         }
     }
 }
@@ -308,6 +291,54 @@ function Update-DeploymentScript {
         
     } catch {
         Write-StepOutput "Error updating deployment script: $($_.Exception.Message)" -Status "Error"
+    }
+}
+
+# Function to update the installation completion message
+function Update-CompletionMessage {
+    param(
+        [string]$DeploymentScriptPath
+    )
+    
+    try {
+        if (!(Test-Path $DeploymentScriptPath)) {
+            Write-StepOutput "Warning: Deployment script not found at $DeploymentScriptPath" -Status "Warning"
+            return
+        }
+        
+        Write-StepOutput "Updating installation completion message..." -Status "Config"
+        
+        # Remove read-only attribute if present
+        $fileItem = Get-Item $DeploymentScriptPath
+        if ($fileItem.Attributes -band [System.IO.FileAttributes]::ReadOnly) {
+            $fileItem.Attributes = $fileItem.Attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly)
+            Write-StepOutput "Removed read-only attribute from deployment script" -Status "Info"
+        }
+        
+        # Read the current deployment script file
+        $scriptContent = Get-Content $DeploymentScriptPath -Raw
+        
+        # Find and replace the default completion message
+        $oldMessage = "You can customize text to appear at the end of an install or remove it completely for unattended installations."
+        $newMessage = "`$(`$adtSession.AppVendor) `$(`$adtSession.AppName) `$(`$adtSession.AppVersion) was successfully installed."
+        
+        if ($scriptContent.Contains($oldMessage)) {
+            # Replace the entire Show-ADTInstallationPrompt line to ensure proper quoting
+            $oldPattern = "Show-ADTInstallationPrompt -Message '$oldMessage' -ButtonRightText 'OK' -Icon Information -NoWait"
+            $newPattern = "Show-ADTInstallationPrompt -Message `"$newMessage`" -ButtonRightText 'OK' -Icon Information -NoWait"
+            $updatedContent = $scriptContent.Replace($oldPattern, $newPattern)
+            
+            # Write the updated content back to the file
+            Set-Content -Path $DeploymentScriptPath -Value $updatedContent -Encoding UTF8
+            Write-StepOutput "Installation completion message updated successfully" -Status "Success"
+            Write-StepOutput "New message: $newMessage" -Status "Info"
+        } else {
+            Write-StepOutput "Warning: Default completion message not found in deployment script" -Status "Warning"
+            Write-StepOutput "The template may have already been customized or uses a different structure" -Status "Info"
+        }
+        
+    } catch {
+        Write-StepOutput "Error updating completion message: $($_.Exception.Message)" -Status "Error"
     }
 }
 
@@ -492,6 +523,9 @@ Write-StepOutput "Updating deployment script configuration..." -Status "Config"
 $deploymentScriptPath = Join-Path $deploymentPath "Invoke-AppDeployToolkit.ps1"
 Update-DeploymentScript -DeploymentScriptPath $deploymentScriptPath -AppVendor $appVendor -AppName $appName -AppVersion $appVersion -Author $Author -DefaultAppArch $DefaultAppArch
 
+# Update the completion message in the same file
+Update-CompletionMessage -DeploymentScriptPath $deploymentScriptPath
+
 Write-Separator
 
 # Step 6: Modify configuration file
@@ -523,6 +557,7 @@ Write-Host @"
    • Company: $CompanySummary
    • Log Path: $LogSummary
    • Assets: $AssetSummary
+   • Completion Message: Custom message with app details
 
 🎯 Next Steps:
    1. Navigate to: $deploymentPath
